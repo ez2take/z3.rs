@@ -58,6 +58,22 @@ impl<'ctx> Model<'ctx> {
     }
 
     /// Returns the interpretation of the given `f` in the `Model`
+    /// Returns `None` if arity > 0, or there is no interpretation in the `Model`
+    pub fn get_func_interp_as_const<T: Ast<'ctx>>(&self, f: &FuncDecl) -> Option<T> {
+        if f.arity() == 0 {
+            let ret =
+                unsafe { Z3_model_get_const_interp(self.ctx.z3_ctx, self.z3_mdl, f.z3_func_decl) };
+            if ret.is_null() {
+                None
+            } else {
+                Some(unsafe { T::wrap(self.ctx, ret) })
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Returns the interpretation of the given `f` in the `Model`
     /// Returns `None` if there is no interpretation in the `Model`
     pub fn get_func_interp(&self, f: &FuncDecl) -> Option<FuncInterp<'ctx>> {
         if f.arity() == 0 {
