@@ -1,32 +1,36 @@
 use std::ffi::CStr;
 use std::fmt;
+use std::rc::Rc;
 
 use z3_sys::*;
 
 use crate::{ast, ast::Ast, Context, Goal};
 
-impl<'ctx> Clone for Goal<'ctx> {
+impl Clone for Goal {
     fn clone(&self) -> Self {
         Self {
-            ctx: self.ctx,
+            ctx: self.ctx.clone(),
             z3_goal: self.z3_goal,
         }
     }
 }
 
-impl<'ctx> Goal<'ctx> {
-    pub(crate) unsafe fn wrap(ctx: &'ctx Context, z3_goal: Z3_goal) -> Goal<'ctx> {
+impl Goal {
+    pub(crate) unsafe fn wrap(ctx: Rc<Context>, z3_goal: Z3_goal) -> Goal {
         Z3_goal_inc_ref(ctx.z3_ctx, z3_goal);
         Goal { ctx, z3_goal }
     }
 
-    pub fn new(ctx: &'ctx Context, models: bool, unsat_cores: bool, proofs: bool) -> Goal<'ctx> {
+    pub fn new(ctx: Rc<Context>, models: bool, unsat_cores: bool, proofs: bool) -> Goal {
         // NOTE: The Z3 context ctx must have been created with proof generation support.
-        unsafe { Self::wrap(ctx, Z3_mk_goal(ctx.z3_ctx, models, unsat_cores, proofs)) }
+        unsafe {
+            let goal = Z3_mk_goal(ctx.z3_ctx, models, unsat_cores, proofs);
+            Self::wrap(ctx, goal)
+        }
     }
 
     /// Add a new formula `a` to the given goal.
-    pub fn assert(&self, ast: &impl ast::Ast<'ctx>) {
+    pub fn assert(&self, ast: &impl ast::Ast) {
         unsafe { Z3_goal_assert(self.ctx.z3_ctx, self.z3_goal, ast.get_z3_ast()) }
     }
 
@@ -66,12 +70,10 @@ impl<'ctx> Goal<'ctx> {
 
     /// Copy a goal `g` from the context `source` to the context `target`.
     #[allow(clippy::needless_lifetimes)]
-    pub fn translate<'dest_ctx>(self, ctx: &'dest_ctx Context) -> Goal<'dest_ctx> {
+    pub fn translate(self, ctx: Rc<Context>) -> Goal {
         unsafe {
-            Goal::wrap(
-                ctx,
-                Z3_goal_translate(self.ctx.z3_ctx, self.z3_goal, ctx.z3_ctx),
-            )
+            let goal = Z3_goal_translate(self.ctx.z3_ctx, self.z3_goal, ctx.z3_ctx);
+            Goal::wrap(ctx, goal)
         }
     }
 
@@ -80,36 +82,36 @@ impl<'ctx> Goal<'ctx> {
         unsafe { Z3_goal_precision(self.ctx.z3_ctx, self.z3_goal) }
     }
 
-    pub fn iter_formulas<'a, T>(&'a self) -> impl Iterator<Item = T> + 'a
+    pub fn iter_formulas<T>(&self) -> impl Iterator<Item = T> + '_
     where
-        T: Ast<'a>,
+        T: Ast,
     {
         let goal_size = self.get_size() as usize;
         let z3_ctx = self.ctx.z3_ctx;
         let z3_goal = self.z3_goal;
         (0..goal_size).map(move |i| {
             let formula = unsafe { Z3_goal_formula(z3_ctx, z3_goal, i as u32) };
-            unsafe { T::wrap(self.ctx, formula) }
+            unsafe { T::wrap(self.ctx.clone(), formula) }
         })
     }
 
     /// Return a vector of the formulas from the given goal.
     pub fn get_formulas<T>(&self) -> Vec<T>
     where
-        T: Ast<'ctx>,
+        T: Ast,
     {
         let goal_size = self.get_size() as usize;
         let mut formulas: Vec<T> = Vec::with_capacity(goal_size);
 
         for i in 0..goal_size {
             let formula = unsafe { Z3_goal_formula(self.ctx.z3_ctx, self.z3_goal, i as u32) };
-            formulas.push(unsafe { T::wrap(self.ctx, formula) });
+            formulas.push(unsafe { T::wrap(self.ctx.clone(), formula) });
         }
         formulas
     }
 }
 
-impl<'ctx> fmt::Display for Goal<'ctx> {
+impl fmt::Display for Goal {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         let p = unsafe { Z3_goal_to_string(self.ctx.z3_ctx, self.z3_goal) };
         if p.is_null() {
@@ -122,13 +124,13 @@ impl<'ctx> fmt::Display for Goal<'ctx> {
     }
 }
 
-impl<'ctx> fmt::Debug for Goal<'ctx> {
+impl fmt::Debug for Goal {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         <Self as fmt::Display>::fmt(self, f)
     }
 }
 
-impl<'ctx> Drop for Goal<'ctx> {
+impl Drop for Goal {
     fn drop(&mut self) {
         unsafe {
             Z3_goal_dec_ref(self.ctx.z3_ctx, self.z3_goal);

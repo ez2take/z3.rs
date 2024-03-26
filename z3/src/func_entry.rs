@@ -1,4 +1,5 @@
 use std::fmt;
+use std::rc::Rc;
 
 use z3_sys::*;
 
@@ -7,8 +8,8 @@ use crate::{
     Context, FuncEntry,
 };
 
-impl<'ctx> FuncEntry<'ctx> {
-    pub(crate) unsafe fn wrap(ctx: &'ctx Context, z3_func_entry: Z3_func_entry) -> Self {
+impl FuncEntry {
+    pub(crate) unsafe fn wrap(ctx: Rc<Context>, z3_func_entry: Z3_func_entry) -> Self {
         Z3_func_entry_inc_ref(ctx.z3_ctx, z3_func_entry);
         Self { ctx, z3_func_entry }
     }
@@ -17,7 +18,7 @@ impl<'ctx> FuncEntry<'ctx> {
     pub fn get_value(&self) -> Dynamic {
         unsafe {
             Dynamic::wrap(
-                self.ctx,
+                self.ctx.clone(),
                 Z3_func_entry_get_value(self.ctx.z3_ctx, self.z3_func_entry),
             )
         }
@@ -33,7 +34,7 @@ impl<'ctx> FuncEntry<'ctx> {
         (0..self.get_num_args())
             .map(|i| unsafe {
                 Dynamic::wrap(
-                    self.ctx,
+                    self.ctx.clone(),
                     Z3_func_entry_get_arg(self.ctx.z3_ctx, self.z3_func_entry, i),
                 )
             })
@@ -41,7 +42,7 @@ impl<'ctx> FuncEntry<'ctx> {
     }
 }
 
-impl<'ctx> fmt::Display for FuncEntry<'ctx> {
+impl fmt::Display for FuncEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(f, "[")?;
         self.get_args()
@@ -52,13 +53,13 @@ impl<'ctx> fmt::Display for FuncEntry<'ctx> {
     }
 }
 
-impl<'ctx> fmt::Debug for FuncEntry<'ctx> {
+impl fmt::Debug for FuncEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         <Self as fmt::Display>::fmt(self, f)
     }
 }
 
-impl<'ctx> Drop for FuncEntry<'ctx> {
+impl Drop for FuncEntry {
     fn drop(&mut self) {
         unsafe {
             Z3_func_entry_dec_ref(self.ctx.z3_ctx, self.z3_func_entry);

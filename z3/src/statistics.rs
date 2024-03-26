@@ -1,5 +1,6 @@
 use std::ffi::CStr;
 use std::fmt;
+use std::rc::Rc;
 
 use z3_sys::*;
 
@@ -28,9 +29,9 @@ pub struct StatisticsEntry {
     pub value: StatisticsValue,
 }
 
-impl<'ctx> Statistics<'ctx> {
+impl Statistics {
     /// Wrap a raw [`Z3_stats`], managing refcounts.
-    pub(crate) unsafe fn wrap(ctx: &'ctx Context, z3_stats: Z3_stats) -> Statistics<'ctx> {
+    pub(crate) unsafe fn wrap(ctx: Rc<Context>, z3_stats: Z3_stats) -> Statistics {
         Z3_stats_inc_ref(ctx.z3_ctx, z3_stats);
         Statistics { ctx, z3_stats }
     }
@@ -79,19 +80,19 @@ impl<'ctx> Statistics<'ctx> {
     }
 }
 
-impl<'ctx> Clone for Statistics<'ctx> {
+impl Clone for Statistics {
     fn clone(&self) -> Self {
-        unsafe { Self::wrap(self.ctx, self.z3_stats) }
+        unsafe { Self::wrap(self.ctx.clone(), self.z3_stats) }
     }
 }
 
-impl<'ctx> fmt::Display for Statistics<'ctx> {
+impl fmt::Display for Statistics {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(f, "<z3.stats>")
     }
 }
 
-impl<'ctx> fmt::Debug for Statistics<'ctx> {
+impl fmt::Debug for Statistics {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         let mut s = f.debug_struct("Statistics");
         for e in self.entries() {
@@ -104,7 +105,7 @@ impl<'ctx> fmt::Debug for Statistics<'ctx> {
     }
 }
 
-impl<'ctx> Drop for Statistics<'ctx> {
+impl Drop for Statistics {
     fn drop(&mut self) {
         unsafe {
             Z3_stats_dec_ref(self.ctx.z3_ctx, self.z3_stats);

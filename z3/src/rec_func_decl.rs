@@ -2,39 +2,33 @@ use std::convert::TryInto;
 use std::ffi::CStr;
 use std::fmt;
 use std::ops::Deref;
+use std::rc::Rc;
 
 use z3_sys::*;
 
 use crate::{ast, ast::Ast, Context, FuncDecl, RecFuncDecl, Sort, Symbol};
 
-impl<'ctx> RecFuncDecl<'ctx> {
-    pub(crate) unsafe fn wrap(ctx: &'ctx Context, z3_func_decl: Z3_func_decl) -> Self {
+impl RecFuncDecl {
+    pub(crate) unsafe fn wrap(ctx: Rc<Context>, z3_func_decl: Z3_func_decl) -> Self {
         Z3_inc_ref(ctx.z3_ctx, Z3_func_decl_to_ast(ctx.z3_ctx, z3_func_decl));
         Self { ctx, z3_func_decl }
     }
 
-    pub fn new<S: Into<Symbol>>(
-        ctx: &'ctx Context,
-        name: S,
-        domain: &[&Sort<'ctx>],
-        range: &Sort<'ctx>,
-    ) -> Self {
+    pub fn new<S: Into<Symbol>>(ctx: Rc<Context>, name: S, domain: &[&Sort], range: &Sort) -> Self {
         assert!(domain.iter().all(|s| s.ctx.z3_ctx == ctx.z3_ctx));
         assert_eq!(ctx.z3_ctx, range.ctx.z3_ctx);
 
         let domain: Vec<_> = domain.iter().map(|s| s.z3_sort).collect();
 
         unsafe {
-            Self::wrap(
-                ctx,
-                Z3_mk_rec_func_decl(
-                    ctx.z3_ctx,
-                    name.into().as_z3_symbol(ctx),
-                    domain.len().try_into().unwrap(),
-                    domain.as_ptr(),
-                    range.z3_sort,
-                ),
-            )
+            let func_decl = Z3_mk_rec_func_decl(
+                ctx.z3_ctx,
+                name.into().as_z3_symbol(&ctx),
+                domain.len().try_into().unwrap(),
+                domain.as_ptr(),
+                range.z3_sort,
+            );
+            Self::wrap(ctx, func_decl)
         }
     }
 
@@ -72,7 +66,7 @@ impl<'ctx> RecFuncDecl<'ctx> {
     /// ```
     ///
     /// Note that `args` should have the types corresponding to the `domain` of the `RecFuncDecl`.
-    pub fn add_def(&self, args: &[&dyn ast::Ast<'ctx>], body: &dyn Ast<'ctx>) {
+    pub fn add_def(&self, args: &[&dyn ast::Ast], body: &dyn Ast) {
         assert!(args.iter().all(|arg| arg.get_ctx() == body.get_ctx()));
         assert_eq!(self.ctx, body.get_ctx());
 
@@ -94,7 +88,7 @@ impl<'ctx> RecFuncDecl<'ctx> {
     }
 }
 
-impl<'ctx> fmt::Display for RecFuncDecl<'ctx> {
+impl fmt::Display for RecFuncDecl {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         let p = unsafe { Z3_func_decl_to_string(self.ctx.z3_ctx, self.z3_func_decl) };
         if p.is_null() {
@@ -107,13 +101,13 @@ impl<'ctx> fmt::Display for RecFuncDecl<'ctx> {
     }
 }
 
-impl<'ctx> fmt::Debug for RecFuncDecl<'ctx> {
+impl fmt::Debug for RecFuncDecl {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         <Self as fmt::Display>::fmt(self, f)
     }
 }
 
-impl<'ctx> Drop for RecFuncDecl<'ctx> {
+impl Drop for RecFuncDecl {
     fn drop(&mut self) {
         unsafe {
             Z3_dec_ref(
@@ -124,8 +118,8 @@ impl<'ctx> Drop for RecFuncDecl<'ctx> {
     }
 }
 
-impl<'ctx> Deref for RecFuncDecl<'ctx> {
-    type Target = FuncDecl<'ctx>;
+impl Deref for RecFuncDecl {
+    type Target = FuncDecl;
 
     fn deref(&self) -> &Self::Target {
         unsafe { &*(self as *const _ as *const Self::Target) }

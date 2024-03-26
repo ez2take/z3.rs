@@ -1,4 +1,5 @@
 use std::fmt;
+use std::rc::Rc;
 
 use z3_sys::*;
 
@@ -7,8 +8,8 @@ use crate::{
     Context, FuncEntry, FuncInterp,
 };
 
-impl<'ctx> FuncInterp<'ctx> {
-    pub(crate) unsafe fn wrap(ctx: &'ctx Context, z3_func_interp: Z3_func_interp) -> Self {
+impl FuncInterp {
+    pub(crate) unsafe fn wrap(ctx: Rc<Context>, z3_func_interp: Z3_func_interp) -> Self {
         Z3_func_interp_inc_ref(ctx.z3_ctx, z3_func_interp);
 
         Self {
@@ -28,7 +29,7 @@ impl<'ctx> FuncInterp<'ctx> {
     }
 
     /// Adds an entry to the function interpretation.
-    pub fn add_entry(&self, args: &[Dynamic<'ctx>], value: &Dynamic<'ctx>) {
+    pub fn add_entry(&self, args: &[Dynamic], value: &Dynamic) {
         unsafe {
             let v = Z3_mk_ast_vector(self.ctx.z3_ctx);
             Z3_ast_vector_inc_ref(self.ctx.z3_ctx, v);
@@ -44,7 +45,7 @@ impl<'ctx> FuncInterp<'ctx> {
         (0..self.get_num_entries())
             .map(|i| unsafe {
                 FuncEntry::wrap(
-                    self.ctx,
+                    self.ctx.clone(),
                     Z3_func_interp_get_entry(self.ctx.z3_ctx, self.z3_func_interp, i),
                 )
             })
@@ -53,10 +54,10 @@ impl<'ctx> FuncInterp<'ctx> {
 
     /// Returns the else value of the function interpretation.
     /// Returns None if the else value is not set by Z3.
-    pub fn get_else(&self) -> Dynamic<'ctx> {
+    pub fn get_else(&self) -> Dynamic {
         unsafe {
             Dynamic::wrap(
-                self.ctx,
+                self.ctx.clone(),
                 Z3_func_interp_get_else(self.ctx.z3_ctx, self.z3_func_interp),
             )
         }
@@ -68,7 +69,7 @@ impl<'ctx> FuncInterp<'ctx> {
     }
 }
 
-impl<'ctx> fmt::Display for FuncInterp<'ctx> {
+impl fmt::Display for FuncInterp {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(f, "[")?;
         self.get_entries().into_iter().try_for_each(|e| {
@@ -95,13 +96,13 @@ impl<'ctx> fmt::Display for FuncInterp<'ctx> {
     }
 }
 
-impl<'ctx> fmt::Debug for FuncInterp<'ctx> {
+impl fmt::Debug for FuncInterp {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         <Self as fmt::Display>::fmt(self, f)
     }
 }
 
-impl<'ctx> Drop for FuncInterp<'ctx> {
+impl Drop for FuncInterp {
     fn drop(&mut self) {
         unsafe {
             Z3_func_interp_dec_ref(self.ctx.z3_ctx, self.z3_func_interp);

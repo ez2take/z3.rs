@@ -1,12 +1,13 @@
 use std::convert::TryInto;
 use std::ffi::CStr;
 use std::fmt;
+use std::rc::Rc;
 
 use z3_sys::*;
 
 use crate::{ast::Ast, Context, Pattern};
 
-impl<'ctx> Pattern<'ctx> {
+impl Pattern {
     /// Create a pattern for quantifier instantiation.
     ///
     /// Z3 uses pattern matching to instantiate quantifiers. If a
@@ -25,28 +26,25 @@ impl<'ctx> Pattern<'ctx> {
     ///
     /// - `ast::forall_const()`
     /// - `ast::exists_const()`
-    pub fn new(ctx: &'ctx Context, terms: &[&dyn Ast]) -> Pattern<'ctx> {
+    pub fn new(ctx: Rc<Context>, terms: &[&dyn Ast]) -> Pattern {
         assert!(!terms.is_empty());
         assert!(terms.iter().all(|t| t.get_ctx().z3_ctx == ctx.z3_ctx));
 
         let terms: Vec<_> = terms.iter().map(|t| t.get_z3_ast()).collect();
-
-        Pattern {
-            ctx,
-            z3_pattern: unsafe {
-                let p = Z3_mk_pattern(
-                    ctx.z3_ctx,
-                    terms.len().try_into().unwrap(),
-                    terms.as_ptr() as *const Z3_ast,
-                );
-                Z3_inc_ref(ctx.z3_ctx, p as Z3_ast);
-                p
-            },
-        }
+        let z3_pattern = unsafe {
+            let p = Z3_mk_pattern(
+                ctx.z3_ctx,
+                terms.len().try_into().unwrap(),
+                terms.as_ptr() as *const Z3_ast,
+            );
+            Z3_inc_ref(ctx.z3_ctx, p as Z3_ast);
+            p
+        };
+        Pattern { ctx, z3_pattern }
     }
 }
 
-impl<'ctx> fmt::Debug for Pattern<'ctx> {
+impl fmt::Debug for Pattern {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         let p = unsafe { Z3_pattern_to_string(self.ctx.z3_ctx, self.z3_pattern) };
         if p.is_null() {
@@ -59,13 +57,13 @@ impl<'ctx> fmt::Debug for Pattern<'ctx> {
     }
 }
 
-impl<'ctx> fmt::Display for Pattern<'ctx> {
+impl fmt::Display for Pattern {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         <Self as fmt::Debug>::fmt(self, f)
     }
 }
 
-impl<'ctx> Drop for Pattern<'ctx> {
+impl Drop for Pattern {
     fn drop(&mut self) {
         unsafe {
             Z3_dec_ref(self.ctx.z3_ctx, self.z3_pattern as Z3_ast);

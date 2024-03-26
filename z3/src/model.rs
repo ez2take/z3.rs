@@ -1,51 +1,50 @@
 use std::ffi::CStr;
 use std::fmt;
+use std::rc::Rc;
 
 use z3_sys::*;
 
 use crate::{ast::Ast, Context, FuncDecl, FuncInterp, Model, Optimize, Solver};
 
-impl<'ctx> Model<'ctx> {
-    unsafe fn wrap(ctx: &'ctx Context, z3_mdl: Z3_model) -> Model<'ctx> {
+impl Model {
+    unsafe fn wrap(ctx: Rc<Context>, z3_mdl: Z3_model) -> Model {
         Z3_model_inc_ref(ctx.z3_ctx, z3_mdl);
         Model { ctx, z3_mdl }
     }
 
-    pub fn of_solver(slv: &Solver<'ctx>) -> Option<Model<'ctx>> {
+    pub fn of_solver(slv: &Solver) -> Option<Model> {
         unsafe {
             let m = Z3_solver_get_model(slv.ctx.z3_ctx, slv.z3_slv);
             if m.is_null() {
                 None
             } else {
-                Some(Self::wrap(slv.ctx, m))
+                Some(Self::wrap(slv.ctx.clone(), m))
             }
         }
     }
 
-    pub fn of_optimize(opt: &Optimize<'ctx>) -> Option<Model<'ctx>> {
+    pub fn of_optimize(opt: &Optimize) -> Option<Model> {
         unsafe {
             let m = Z3_optimize_get_model(opt.ctx.z3_ctx, opt.z3_opt);
             if m.is_null() {
                 None
             } else {
-                Some(Self::wrap(opt.ctx, m))
+                Some(Self::wrap(opt.ctx.clone(), m))
             }
         }
     }
 
     /// Translate model to context `dest`
-    pub fn translate<'dest_ctx>(&self, dest: &'dest_ctx Context) -> Model<'dest_ctx> {
+    pub fn translate(&self, dest: Rc<Context>) -> Model {
         unsafe {
-            Model::wrap(
-                dest,
-                Z3_model_translate(self.ctx.z3_ctx, self.z3_mdl, dest.z3_ctx),
-            )
+            let model = Z3_model_translate(self.ctx.z3_ctx, self.z3_mdl, dest.z3_ctx);
+            Model::wrap(dest, model)
         }
     }
 
     /// Returns the interpretation of the given `ast` in the `Model`
     /// Returns `None` if there is no interpretation in the `Model`
-    pub fn get_const_interp<T: Ast<'ctx>>(&self, ast: &T) -> Option<T> {
+    pub fn get_const_interp<T: Ast>(&self, ast: &T) -> Option<T> {
         let func = ast.safe_decl().ok()?;
 
         let ret =
@@ -53,20 +52,20 @@ impl<'ctx> Model<'ctx> {
         if ret.is_null() {
             None
         } else {
-            Some(unsafe { T::wrap(self.ctx, ret) })
+            Some(unsafe { T::wrap(self.ctx.clone(), ret) })
         }
     }
 
     /// Returns the interpretation of the given `f` in the `Model`
     /// Returns `None` if arity > 0, or there is no interpretation in the `Model`
-    pub fn get_func_interp_as_const<T: Ast<'ctx>>(&self, f: &FuncDecl) -> Option<T> {
+    pub fn get_func_interp_as_const<T: Ast>(&self, f: &FuncDecl) -> Option<T> {
         if f.arity() == 0 {
             let ret =
                 unsafe { Z3_model_get_const_interp(self.ctx.z3_ctx, self.z3_mdl, f.z3_func_decl) };
             if ret.is_null() {
                 None
             } else {
-                Some(unsafe { T::wrap(self.ctx, ret) })
+                Some(unsafe { T::wrap(self.ctx.clone(), ret) })
             }
         } else {
             None
@@ -75,7 +74,7 @@ impl<'ctx> Model<'ctx> {
 
     /// Returns the interpretation of the given `f` in the `Model`
     /// Returns `None` if there is no interpretation in the `Model`
-    pub fn get_func_interp(&self, f: &FuncDecl) -> Option<FuncInterp<'ctx>> {
+    pub fn get_func_interp(&self, f: &FuncDecl) -> Option<FuncInterp> {
         if f.arity() == 0 {
             let ret =
                 unsafe { Z3_model_get_const_interp(self.ctx.z3_ctx, self.z3_mdl, f.z3_func_decl) };
@@ -93,7 +92,7 @@ impl<'ctx> Model<'ctx> {
                         if unsafe { Z3_is_as_array(self.ctx.z3_ctx, ret) } {
                             let fd = unsafe {
                                 FuncDecl::wrap(
-                                    self.ctx,
+                                    self.ctx.clone(),
                                     Z3_get_as_array_func_decl(self.ctx.z3_ctx, ret),
                                 )
                             };
@@ -111,14 +110,14 @@ impl<'ctx> Model<'ctx> {
             if ret.is_null() {
                 None
             } else {
-                Some(unsafe { FuncInterp::wrap(self.ctx, ret) })
+                Some(unsafe { FuncInterp::wrap(self.ctx.clone(), ret) })
             }
         }
     }
 
     pub fn eval<T>(&self, ast: &T, model_completion: bool) -> Option<T>
     where
-        T: Ast<'ctx>,
+        T: Ast,
     {
         let mut tmp: Z3_ast = ast.get_z3_ast();
         let res = {
@@ -133,7 +132,7 @@ impl<'ctx> Model<'ctx> {
             }
         };
         if res {
-            Some(unsafe { T::wrap(self.ctx, tmp) })
+            Some(unsafe { T::wrap(self.ctx.clone(), tmp) })
         } else {
             None
         }
@@ -146,12 +145,12 @@ impl<'ctx> Model<'ctx> {
         }
     }
 
-    pub fn iter(&'ctx self) -> ModelIter<'ctx> {
+    pub fn iter(&self) -> ModelIter {
         self.into_iter()
     }
 }
 
-impl<'ctx> fmt::Display for Model<'ctx> {
+impl fmt::Display for Model {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         let p = unsafe { Z3_model_to_string(self.ctx.z3_ctx, self.z3_mdl) };
         if p.is_null() {
@@ -164,13 +163,13 @@ impl<'ctx> fmt::Display for Model<'ctx> {
     }
 }
 
-impl<'ctx> fmt::Debug for Model<'ctx> {
+impl fmt::Debug for Model {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         <Self as fmt::Display>::fmt(self, f)
     }
 }
 
-impl<'ctx> Drop for Model<'ctx> {
+impl Drop for Model {
     fn drop(&mut self) {
         unsafe { Z3_model_dec_ref(self.ctx.z3_ctx, self.z3_mdl) };
     }
@@ -179,13 +178,13 @@ impl<'ctx> Drop for Model<'ctx> {
 #[derive(Debug)]
 /// <https://z3prover.github.io/api/html/classz3py_1_1_model_ref.html#a7890b7c9bc70cf2a26a343c22d2c8367>
 pub struct ModelIter<'ctx> {
-    model: &'ctx Model<'ctx>,
+    model: &'ctx Model,
     idx: u32,
     len: u32,
 }
 
-impl<'ctx> IntoIterator for &'ctx Model<'ctx> {
-    type Item = FuncDecl<'ctx>;
+impl<'ctx> IntoIterator for &'ctx Model {
+    type Item = FuncDecl;
     type IntoIter = ModelIter<'ctx>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -198,7 +197,7 @@ impl<'ctx> IntoIterator for &'ctx Model<'ctx> {
 }
 
 impl<'ctx> Iterator for ModelIter<'ctx> {
-    type Item = FuncDecl<'ctx>;
+    type Item = FuncDecl;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.idx >= self.len {
@@ -211,7 +210,7 @@ impl<'ctx> Iterator for ModelIter<'ctx> {
                     Z3_model_get_const_decl(self.model.ctx.z3_ctx, self.model.z3_mdl, self.idx)
                 };
                 self.idx += 1;
-                Some(unsafe { FuncDecl::wrap(self.model.ctx, const_decl) })
+                Some(unsafe { FuncDecl::wrap(self.model.ctx.clone(), const_decl) })
             } else {
                 let func_decl = unsafe {
                     Z3_model_get_func_decl(
@@ -221,7 +220,7 @@ impl<'ctx> Iterator for ModelIter<'ctx> {
                     )
                 };
                 self.idx += 1;
-                Some(unsafe { FuncDecl::wrap(self.model.ctx, func_decl) })
+                Some(unsafe { FuncDecl::wrap(self.model.ctx.clone(), func_decl) })
             }
         }
     }
@@ -236,9 +235,9 @@ impl<'ctx> Iterator for ModelIter<'ctx> {
 fn test_unsat() {
     use crate::{ast, Config, SatResult};
     let cfg = Config::new();
-    let ctx = Context::new(&cfg);
-    let solver = Solver::new(&ctx);
-    solver.assert(&ast::Bool::from_bool(&ctx, false));
+    let ctx = Rc::new(Context::new(&cfg));
+    let solver = Solver::new(ctx.clone());
+    solver.assert(&ast::Bool::from_bool(ctx.clone(), false));
     assert_eq!(solver.check(), SatResult::Unsat);
     assert!(solver.get_model().is_none());
 }

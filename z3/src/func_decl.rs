@@ -1,39 +1,33 @@
 use std::convert::TryInto;
 use std::ffi::CStr;
 use std::fmt;
+use std::rc::Rc;
 
 use z3_sys::*;
 
 use crate::{ast, ast::Ast, Context, FuncDecl, Sort, Symbol};
 
-impl<'ctx> FuncDecl<'ctx> {
-    pub(crate) unsafe fn wrap(ctx: &'ctx Context, z3_func_decl: Z3_func_decl) -> Self {
+impl FuncDecl {
+    pub(crate) unsafe fn wrap(ctx: Rc<Context>, z3_func_decl: Z3_func_decl) -> Self {
         Z3_inc_ref(ctx.z3_ctx, Z3_func_decl_to_ast(ctx.z3_ctx, z3_func_decl));
         Self { ctx, z3_func_decl }
     }
 
-    pub fn new<S: Into<Symbol>>(
-        ctx: &'ctx Context,
-        name: S,
-        domain: &[&Sort<'ctx>],
-        range: &Sort<'ctx>,
-    ) -> Self {
+    pub fn new<S: Into<Symbol>>(ctx: Rc<Context>, name: S, domain: &[&Sort], range: &Sort) -> Self {
         assert!(domain.iter().all(|s| s.ctx.z3_ctx == ctx.z3_ctx));
         assert_eq!(ctx.z3_ctx, range.ctx.z3_ctx);
 
         let domain: Vec<_> = domain.iter().map(|s| s.z3_sort).collect();
 
         unsafe {
-            Self::wrap(
-                ctx,
-                Z3_mk_func_decl(
-                    ctx.z3_ctx,
-                    name.into().as_z3_symbol(ctx),
-                    domain.len().try_into().unwrap(),
-                    domain.as_ptr(),
-                    range.z3_sort,
-                ),
-            )
+            let func_decl = Z3_mk_func_decl(
+                ctx.z3_ctx,
+                name.into().as_z3_symbol(&ctx),
+                domain.len().try_into().unwrap(),
+                domain.as_ptr(),
+                range.z3_sort,
+            );
+            Self::wrap(ctx, func_decl)
         }
     }
 
@@ -59,13 +53,13 @@ impl<'ctx> FuncDecl<'ctx> {
     /// Create a constant (if `args` has length 0) or function application (otherwise).
     ///
     /// Note that `args` should have the types corresponding to the `domain` of the `FuncDecl`.
-    pub fn apply(&self, args: &[&dyn ast::Ast<'ctx>]) -> ast::Dynamic<'ctx> {
+    pub fn apply(&self, args: &[&dyn ast::Ast]) -> ast::Dynamic {
         assert!(args.iter().all(|s| s.get_ctx().z3_ctx == self.ctx.z3_ctx));
 
         let args: Vec<_> = args.iter().map(|a| a.get_z3_ast()).collect();
 
         unsafe {
-            ast::Dynamic::wrap(self.ctx, {
+            ast::Dynamic::wrap(self.ctx.clone(), {
                 Z3_mk_app(
                     self.ctx.z3_ctx,
                     self.z3_func_decl,
@@ -99,7 +93,7 @@ impl<'ctx> FuncDecl<'ctx> {
     }
 }
 
-impl<'ctx> fmt::Display for FuncDecl<'ctx> {
+impl fmt::Display for FuncDecl {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         let p = unsafe { Z3_func_decl_to_string(self.ctx.z3_ctx, self.z3_func_decl) };
         if p.is_null() {
@@ -112,13 +106,13 @@ impl<'ctx> fmt::Display for FuncDecl<'ctx> {
     }
 }
 
-impl<'ctx> fmt::Debug for FuncDecl<'ctx> {
+impl fmt::Debug for FuncDecl {
     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         <Self as fmt::Display>::fmt(self, f)
     }
 }
 
-impl<'ctx> Drop for FuncDecl<'ctx> {
+impl Drop for FuncDecl {
     fn drop(&mut self) {
         unsafe {
             Z3_dec_ref(

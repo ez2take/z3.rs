@@ -1,5 +1,6 @@
 use log::debug;
 use std::ffi::CString;
+use std::rc::Rc;
 
 use z3_sys::*;
 
@@ -18,8 +19,8 @@ impl Context {
     }
 
     /// Interrupt a solver performing a satisfiability test, a tactic processing a goal, or simplify functions.
-    pub fn interrupt(&self) {
-        self.handle().interrupt();
+    pub fn interrupt(ctx: Rc<Self>) {
+        Self::handle(ctx).interrupt();
     }
 
     /// Obtain a handle that can be used to interrupt computation from another thread.
@@ -28,8 +29,8 @@ impl Context {
     ///
     /// - [`ContextHandle`]
     /// - [`ContextHandle::interrupt()`]
-    pub fn handle(&self) -> ContextHandle {
-        ContextHandle { ctx: self }
+    pub fn handle(ctx: Rc<Self>) -> ContextHandle {
+        ContextHandle { ctx }
     }
 
     /// Update a global parameter.
@@ -55,7 +56,7 @@ impl Context {
     }
 }
 
-impl<'ctx> ContextHandle<'ctx> {
+impl ContextHandle {
     /// Interrupt a solver performing a satisfiability test, a tactic processing a goal, or simplify functions.
     pub fn interrupt(&self) {
         unsafe {
@@ -64,8 +65,8 @@ impl<'ctx> ContextHandle<'ctx> {
     }
 }
 
-unsafe impl<'ctx> Sync for ContextHandle<'ctx> {}
-unsafe impl<'ctx> Send for ContextHandle<'ctx> {}
+unsafe impl Sync for ContextHandle {}
+unsafe impl Send for ContextHandle {}
 
 impl Drop for Context {
     fn drop(&mut self) {
